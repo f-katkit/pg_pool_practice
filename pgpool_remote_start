@@ -1,0 +1,3 @@
+#!/bin/sh
+ssh -o "StrictHostKeyChecking no" -T $1 /usr/lib/postgresql/9.4/bin/pg_ctl -w -D $2 start \
+    2>/dev/null 1>/dev/null < /dev/null &
