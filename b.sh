@@ -1,6 +1,9 @@
 #!/bin/sh
 
 IPADDR=`LANG=C /sbin/ifconfig | grep 'inet addr'|sed -n 2p | awk '{print $2;}' | cut -d: -f2`
+OTHERIPADDR=192.168.33.12
+DELEGATEIPADDR=192.168.33.14
+
 sh -c 'echo "deb http://apt.postgresql.org/pub/repos/apt/ $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
 apt-get install wget ca-certificates
 wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
@@ -21,7 +24,7 @@ sed -i -e "s/#checkpoint_completion_target .*/checkpoint_completion_target = \'0
 sed -i -e "s/#checkpoint_segments .*/checkpoint_segments = 16/g" /etc/postgresql/9.4/main/postgresql.conf
 sed -i -e "s/#checkpoint_timeout =.*/checkpoint_timeout = \'10min\'/g" /etc/postgresql/9.4/main/postgresql.conf
 
-sed -i -e "s/listen_addresses =.*/listen_addresses = \'${IPADDR}\'/g" /etc/pgpool2/pgpool.conf
+sed -i -e "s/listen_addresses =.*/listen_addresses = \'*\'/g" /etc/pgpool2/pgpool.conf
 # sed -i -e "s/num_init_children =.*/num_init_children = 64/g" /etc/pgpool2/pgpool.conf
 # sed -i -e "s/max_pool =.*/max_pool = 4/g" /etc/pgpool2/pgpool.conf
 # sed -i -e "s/memory_cache_enabled =.*/memory_cache_enabled = on/g" /etc/pgpool2/pgpool.conf
@@ -40,10 +43,23 @@ sed -i -e "s/#pool_passwd =.*/pool_passwd = \'pool_passwd\'/g" /etc/pgpool2/pgpo
 sed -i -e "s/replication_mode =.*/replication_mode = on/g" /etc/pgpool2/pgpool.conf
 sed -i -e "s/replication_stop_on_mismatch =.*/replication_stop_on_mismatch = on/g" /etc/pgpool2/pgpool.conf
 sed -i -e "s/failover_if_affected_tuples_mismatch = .*/failover_if_affected_tuples_mismatch = on/g" /etc/pgpool2/pgpool.conf
+sed -i -e "s/load_balance_mode = .*/load_balance_mode = on/g" /etc/pgpool2/pgpool.conf
 sed -i -e "s/recovery_user =.*/recovery_user = \'postgres\' /g" /etc/pgpool2/pgpool.conf
 sed -i -e "s/recovery_password  =.*/recovery_password = ''/g" /etc/pgpool2/pgpool.conf
 sed -i -e "s/recovery_1st_stage_command =.*/recovery_1st_stage_command = \'recovery_1st_stage.sh\'/g" /etc/pgpool2/pgpool.conf
 sed -i -e "s/recovery_2nd_stage_command =.*/recovery_2nd_stage_command = \'recovery_2nd_stage.sh\'/g" /etc/pgpool2/pgpool.conf
+sed -i -e "s/use_watchdog =.*/use_watchdog = on/g" /etc/pgpool2/pgpool.conf
+# sed -i -e "s/trusted_servers =.*/trusted_servers = \'${IPADDR},${OTHERIPADDR}\'/g" /etc/pgpool2/pgpool.conf
+sed -i -e "s/wd_hostname =.*/wd_hostname = \'${IPADDR}\'/g" /etc/pgpool2/pgpool.conf
+sed -i -e "s/wd_authkey =.*/wd_authkey = \'pg_dog\'/g" /etc/pgpool2/pgpool.conf
+sed -i -e "s/delegate_IP =.*/delegate_IP = \'${DELEGATEIPADDR}\'/g" /etc/pgpool2/pgpool.conf
+sed -i -e "s/heartbeat_destination0 =.*/heartbeat_destination0 = \'${OTHERIPADDR}\'/g" /etc/pgpool2/pgpool.conf
+sed -i -e "s/heartbeat_device0 =.*/heartbeat_device0 = \'eth1\'/g" /etc/pgpool2/pgpool.conf
+sed -i -e "s/#other_pgpool_hostname0 =.*/other_pgpool_hostname0 = \'${OTHERIPADDR}\'/g" /etc/pgpool2/pgpool.conf
+sed -i -e "s/#other_pgpool_port0 =.*/other_pgpool_port0 = 5432/g" /etc/pgpool2/pgpool.conf
+sed -i -e "s/#other_wd_port0 =.*/other_wd_port0 = 9000/g" /etc/pgpool2/pgpool.conf
+
+
 
 wget http://www.pgpool.net/download.php?f=pgpool-II-3.4.3.tar.gz
 PATH=$PATH:/usr/lib/postgresql/9.4/bin/
@@ -88,9 +104,8 @@ mkdir -p /backup/postgresql/wal_archives
 chmod -R 700 /backup/postgresql/
 chown -R postgres.postgres /backup/postgresql/
 
-service postgresql restart
+service postgresql stop
 service pgpool2 stop
-/usr/sbin/pgpool -n > /var/log/postgresql/pgpool.log 2>&1 &
 
 # su postgres -l -c 'createdb db_test01'
 # su postgres -l -c "psql db_test01 -c 'create table t1 (a int, b text)'"
@@ -110,3 +125,10 @@ chmod 600 /var/lib/postgresql/.ssh/id_dsa /var/lib/postgresql/.ssh/authorized_ke
 chmod 700 /var/lib/postgresql/.ssh/
 chown -R postgres.postgres /var/lib/postgresql/.ssh
 cp /vagrant/sql.sh /root/sql.sh
+
+
+psql db_test01 -U pg_pool -p 5432 -h 192.168.33.12 -c 'show pool_nodes'
+sleep 3
+pcp_recovery_node 100 192.168.33.12 9898 pg_pool pg_passwd 1
+# su -c '/usr/sbin/pgpool -n > /var/log/pgpool/pgpool.log 2>&1 &' postgres
+pgpool -n > /var/log/pgpool/pgpool.log 2>&1 &
